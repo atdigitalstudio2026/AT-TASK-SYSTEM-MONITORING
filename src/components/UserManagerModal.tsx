@@ -76,7 +76,9 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
   if (!isOpen) return null;
 
   const handleCopyCredentials = (user: UserProfile) => {
-    const text = `Portal: AT Digital Studio\nNama: ${user.name}\nUsername: ${user.username || user.email.split('@')[0]}\nEmail: ${user.email}\nPeran: ${user.role === 'ADMIN' || user.role === 'MANAGER' ? 'Manager Studio' : 'Desainer Grafis'}\nPassword: ${user.initialPassword || '(Gunakan kata sandi yang telah ditentukan)'}\n\nSilakan masuk melalui form login di web studio.`;
+    const defaultPass = user.role === 'ADMIN' || user.role === 'MANAGER' ? 'admin123456' : 'designer123';
+    const userPass = user.initialPassword || defaultPass;
+    const text = `Portal: AT Digital Studio\nNama: ${user.name}\nUsername: ${user.username || user.email.split('@')[0]}\nEmail: ${user.email}\nPeran: ${user.role === 'ADMIN' || user.role === 'MANAGER' ? 'Manager Studio' : 'Desainer Grafis'}\nPassword: ${userPass}\n\nSilakan masuk melalui form login di web studio menggunakan Username & Password di atas.`;
     navigator.clipboard.writeText(text);
     setCopiedUserId(user.id);
     setTimeout(() => setCopiedUserId(null), 2500);
@@ -161,6 +163,7 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
       if (editingUserId) {
         // Update user
         const existing = users.find(u => u.id === editingUserId);
+        const newPasswordProvided = formPassword.trim();
         const updated: UserProfile = {
           id: editingUserId,
           username: formUsername.trim().toLowerCase().replace(/[^a-z0-9_]/g, ''),
@@ -169,14 +172,21 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
           role: formRole,
           status: formStatus,
           avatar: existing?.avatar,
+          initialPassword: newPasswordProvided.length >= 6 
+            ? newPasswordProvided 
+            : (existing?.initialPassword || (formRole === 'MANAGER' || formRole === 'ADMIN' ? 'admin123456' : 'designer123')),
           createdAt: existing?.createdAt || new Date().toISOString()
         };
         await onSaveUser(updated);
+        if (newPasswordProvided.length >= 6 && onResetUserPassword) {
+          await onResetUserPassword(editingUserId, newPasswordProvided);
+        }
         setSuccessMessage(`Data pengguna ${updated.name} berhasil diperbarui.`);
       } else {
         // Create new user
         const cleanUser = formUsername.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-        const pass = formPassword.trim() || 'studio123';
+        const defaultRolePass = formRole === 'MANAGER' || formRole === 'ADMIN' ? 'admin123456' : 'designer123';
+        const pass = formPassword.trim() || defaultRolePass;
 
         if (onRegisterAuthUser) {
           await onRegisterAuthUser(cleanUser, formName.trim(), formEmail.trim().toLowerCase(), pass, formRole);
@@ -188,11 +198,12 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
             email: formEmail.trim().toLowerCase(),
             role: formRole,
             status: formStatus,
+            initialPassword: pass,
             createdAt: new Date().toISOString()
           };
           await onSaveUser(newUser);
         }
-        setSuccessMessage(`Pengguna baru ${formName} berhasil dibuat dengan password awal: ${pass}`);
+        setSuccessMessage(`Pengguna baru ${formName} (@${cleanUser}) berhasil dibuat dengan password: ${pass}`);
       }
       setTimeout(() => {
         resetForm();
@@ -569,12 +580,15 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
                               <Mail className="w-2.5 h-2.5" />
                               {user.email}
                             </div>
-                            {user.initialPassword && (
-                              <div className="text-[10.5px] text-amber-600 dark:text-amber-400 font-mono flex items-center gap-1 mt-0.5" title="Kata sandi yang diberikan manager">
-                                <KeyRound className="w-3 h-3" />
-                                <span>Sandi: {user.initialPassword}</span>
-                              </div>
-                            )}
+                            {(() => {
+                              const displayPass = user.initialPassword || (user.role === 'MANAGER' || user.role === 'ADMIN' ? 'admin123456' : 'designer123');
+                              return (
+                                <div className="text-[10.5px] text-amber-600 dark:text-amber-400 font-mono flex items-center gap-1.5 mt-0.5" title="Kata sandi akun pengguna">
+                                  <KeyRound className="w-3 h-3 shrink-0" />
+                                  <span>Sandi: <strong className="font-semibold">{displayPass}</strong></span>
+                                </div>
+                              );
+                            })()}
                           </div>
                         </div>
                       </td>

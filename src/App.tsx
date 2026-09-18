@@ -669,6 +669,7 @@ export default function App() {
   if (!currentProfile && !currentUser) {
     return (
       <LoginPage
+        users={users}
         onLoginSuccess={(profile) => {
           setCurrentProfile(profile);
           showToast(`Selamat datang kembali, ${profile?.name || 'User'}!`);

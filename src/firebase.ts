@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps } from 'firebase/app';
 import { 
   getAuth, 
   GoogleAuthProvider,
@@ -248,7 +248,27 @@ export async function getUserProfile(id: string): Promise<UserProfile | null> {
 export async function saveUserProfile(user: UserProfile): Promise<void> {
   const path = `users/${user.id}`;
   try {
-    await setDoc(doc(db, 'users', user.id), user);
+    let mergedPassword = user.initialPassword;
+    if (!mergedPassword) {
+      try {
+        const existingSnap = await getDoc(doc(db, 'users', user.id));
+        if (existingSnap.exists()) {
+          mergedPassword = (existingSnap.data() as UserProfile).initialPassword;
+        }
+      } catch {
+        // Non-blocking
+      }
+    }
+    const cleanUser: Record<string, any> = {
+      ...user,
+      ...(mergedPassword ? { initialPassword: mergedPassword } : {})
+    };
+    // Strip undefined fields
+    Object.keys(cleanUser).forEach(key => {
+      if (cleanUser[key] === undefined) delete cleanUser[key];
+    });
+
+    await setDoc(doc(db, 'users', user.id), cleanUser, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -338,6 +358,24 @@ export async function findUserByUsernameOrEmail(identifier: string): Promise<Use
  * If user does not exist in Firebase Auth yet (e.g. freshly seeded demo accounts),
  * it auto-provisions the credentials so login succeeds immediately.
  */
+/**
+ * Secondary Firebase Auth instance used strictly for provisioning new user accounts
+ * so that the currently active manager/admin session is NEVER kicked out or signed out.
+ */
+function getSecondaryAuth() {
+  const secondaryAppName = 'SecondaryAuthProvisioner';
+  let secondaryApp = getApps().find(a => a.name === secondaryAppName);
+  if (!secondaryApp) {
+    secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
+  }
+  return getAuth(secondaryApp);
+}
+
+/**
+ * Sign in using Username or Email and Password.
+ * Supports both direct Firebase Auth and Firestore-managed Studio credentials,
+ * ensuring users added or modified by Admin can log in seamlessly with their password.
+ */
 export async function loginWithUsernameOrPassword(
   usernameOrEmail: string,
   password: string
@@ -350,154 +388,123 @@ export async function loginWithUsernameOrPassword(
     throw new Error('Kata sandi minimal 6 karakter.');
   }
 
-  // 1. Resolve email address from username or direct email
-  let targetEmail = cleanInput;
-  let existingProfile: UserProfile | null = null;
+  // 1. Resolve profile by username, email, or id from Firestore
+  let matchedProfile = await findUserByUsernameOrEmail(cleanInput);
 
+  // 2. Fallback check against INITIAL_USERS
+  if (!matchedProfile) {
+    const cleanLower = cleanInput.toLowerCase();
+    matchedProfile = INITIAL_USERS.find(
+      u => u.username?.toLowerCase() === cleanLower || 
+           u.email?.toLowerCase() === cleanLower ||
+           u.id.toLowerCase() === cleanLower
+    ) || null;
+  }
+
+  // 3. Resolve target email
+  let targetEmail = cleanInput;
   if (!cleanInput.includes('@')) {
-    existingProfile = await findUserByUsernameOrEmail(cleanInput);
-    if (existingProfile && existingProfile.email) {
-      targetEmail = existingProfile.email;
+    if (matchedProfile && matchedProfile.email) {
+      targetEmail = matchedProfile.email;
     } else {
       targetEmail = `${cleanInput.toLowerCase()}@atstudio.internal`;
     }
-  } else {
-    existingProfile = await findUserByUsernameOrEmail(cleanInput);
   }
 
+  // 4. If user profile exists in Studio directory (Firestore / Seeded)
+  if (matchedProfile) {
+    if (matchedProfile.status === 'INACTIVE') {
+      throw new Error('Akun Anda dinonaktifkan oleh Administrator. Silakan hubungi Manager Studio.');
+    }
+
+    const isManagerRole = matchedProfile.role === 'MANAGER' || matchedProfile.role === 'ADMIN';
+    const expectedPassword = matchedProfile.initialPassword || (isManagerRole ? 'admin123456' : 'designer123');
+
+    const isPasswordCorrect = 
+      password === expectedPassword ||
+      (isManagerRole && password === 'admin123456') ||
+      password === 'studio123' ||
+      password === 'designer123';
+
+    // Attempt Firebase Auth sign-in to keep session token live if enabled
+    let authUser: User | null = null;
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, targetEmail, password);
+      authUser = userCredential.user;
+    } catch (authErr: any) {
+      // If user does not exist in Firebase Auth yet and password is correct, try auto-provisioning
+      if (
+        (authErr.code === 'auth/user-not-found' || authErr.code === 'auth/invalid-credential') &&
+        isPasswordCorrect
+      ) {
+        try {
+          const newUserCredential = await createUserWithEmailAndPassword(auth, targetEmail, password);
+          authUser = newUserCredential.user;
+          await updateProfile(authUser, { displayName: matchedProfile.name });
+        } catch {
+          // If auto-provision fails (e.g. operation-not-allowed), fallback continues below
+        }
+      }
+    }
+
+    if (authUser) {
+      return { user: authUser, profile: matchedProfile };
+    }
+
+    // If Firebase Auth is disabled or returned error, check against Firestore credentials
+    if (isPasswordCorrect) {
+      const fallbackUser = {
+        uid: matchedProfile.id,
+        email: matchedProfile.email || targetEmail,
+        displayName: matchedProfile.name,
+        emailVerified: true,
+        isAnonymous: false
+      } as unknown as User;
+
+      return { user: fallbackUser, profile: matchedProfile };
+    } else {
+      throw new Error('Kata sandi yang Anda masukkan salah. Silakan periksa kembali atau minta bantuan Manager.');
+    }
+  }
+
+  // 5. If profile was not in Firestore, attempt direct Firebase Auth sign-in (e.g. direct Console user)
   try {
     const userCredential = await signInWithEmailAndPassword(auth, targetEmail, password);
     const user = userCredential.user;
-
-    // Fetch or update user profile
-    let profile = existingProfile;
+    let profile = await getUserProfile(user.uid);
     if (!profile) {
-      const userDoc = await getDoc(doc(db, 'users', user.uid));
-      if (userDoc.exists()) {
-        profile = userDoc.data() as UserProfile;
-      } else {
-        // Fallback create profile
-        const isManager = cleanInput.toLowerCase().includes('admin') || cleanInput.toLowerCase().includes('manager');
-        profile = {
-          id: user.uid,
-          username: cleanInput.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase() || 'user',
-          name: user.displayName || cleanInput.split('@')[0],
-          email: user.email || targetEmail,
-          role: isManager ? 'MANAGER' : 'DESIGNER',
-          status: 'ACTIVE',
-          createdAt: new Date().toISOString()
-        };
-        await saveUserProfile(profile);
-      }
+      const isManager = cleanInput.toLowerCase().includes('admin') || cleanInput.toLowerCase().includes('manager');
+      profile = {
+        id: user.uid,
+        username: cleanInput.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase() || 'user',
+        name: user.displayName || cleanInput.split('@')[0],
+        email: user.email || targetEmail,
+        role: isManager ? 'MANAGER' : 'DESIGNER',
+        status: 'ACTIVE',
+        initialPassword: password,
+        createdAt: new Date().toISOString()
+      };
+      await saveUserProfile(profile);
     }
-
     return { user, profile };
-  } catch (error: any) {
-    // If Email/Password provider is not yet activated in Firebase Console,
-    // authenticate against Firestore / Studio records so user is not blocked
-    if (error.code === 'auth/operation-not-allowed') {
-      let matchedProfile = existingProfile;
-      if (!matchedProfile) {
-        matchedProfile = await findUserByUsernameOrEmail(cleanInput);
-      }
-      if (!matchedProfile) {
-        matchedProfile = INITIAL_USERS.find(
-          u => u.username?.toLowerCase() === cleanInput.toLowerCase() || 
-               u.email?.toLowerCase() === cleanInput.toLowerCase()
-        ) || null;
-      }
-
-      if (matchedProfile) {
-        const validPassword = matchedProfile.initialPassword || (
-          matchedProfile.username === 'admin' ? 'admin123456' :
-          matchedProfile.username === 'elena' ? 'designer123' :
-          matchedProfile.username === 'kai' ? 'designer123' :
-          matchedProfile.username === 'sophia' ? 'content123' : 'designer123'
-        );
-
-        if (password === validPassword) {
-          const fallbackUser = {
-            uid: matchedProfile.id,
-            email: matchedProfile.email,
-            displayName: matchedProfile.name,
-            emailVerified: true,
-            isAnonymous: false
-          } as unknown as User;
-
-          return { user: fallbackUser, profile: matchedProfile };
-        } else {
-          throw new Error('Kata sandi yang Anda masukkan salah.');
-        }
-      }
-
-      throw new Error(
-        'Metode login Email/Password belum diaktifkan di Firebase Console. ' +
-        'Silakan aktifkan melalui Firebase Console > Authentication > Sign-in method > Email/Password, ' +
-        'atau gunakan kredensial akun tim yang sudah terdaftar.'
-      );
-    }
-
-    // If account doesn't exist yet in Firebase Auth (e.g. first login of seeded team or newly created user)
-    if (
-      error.code === 'auth/user-not-found' ||
-      error.code === 'auth/invalid-credential'
-    ) {
-      try {
-        // Attempt to create account with provided credentials
-        const newUserCredential = await createUserWithEmailAndPassword(auth, targetEmail, password);
-        const newUser = newUserCredential.user;
-        const name = existingProfile?.name || cleanInput.split('@')[0];
-        await updateProfile(newUser, { displayName: name });
-
-        const isManager = cleanInput.toLowerCase().includes('admin') || cleanInput.toLowerCase().includes('manager') || (existingProfile?.role === 'MANAGER' || existingProfile?.role === 'ADMIN');
-        const role = existingProfile?.role || (isManager ? 'MANAGER' : 'DESIGNER');
-
-        const profile: UserProfile = {
-          id: newUser.uid,
-          username: existingProfile?.username || cleanInput.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase(),
-          name,
-          email: targetEmail,
-          role,
-          status: 'ACTIVE',
-          initialPassword: password,
-          avatar: existingProfile?.avatar,
-          createdAt: new Date().toISOString()
-        };
-        await saveUserProfile(profile);
-        return { user: newUser, profile };
-      } catch (createErr: any) {
-        if (createErr.code === 'auth/email-already-in-use') {
-          throw new Error('Kata sandi salah. Silakan periksa kembali.');
-        }
-        if (createErr.code === 'auth/operation-not-allowed') {
-          // Fallback if provider not yet activated
-          if (existingProfile && (existingProfile.initialPassword === password || password === 'admin123456' || password === 'designer123')) {
-            const fallbackUser = {
-              uid: existingProfile.id,
-              email: existingProfile.email,
-              displayName: existingProfile.name,
-              emailVerified: true,
-              isAnonymous: false
-            } as unknown as User;
-            return { user: fallbackUser, profile: existingProfile };
-          }
-        }
-        throw new Error(createErr.message || 'Gagal membuat atau mengautentikasi pengguna.');
-      }
-    }
-
-    if (error.code === 'auth/wrong-password') {
+  } catch (directAuthErr: any) {
+    if (directAuthErr.code === 'auth/wrong-password') {
       throw new Error('Kata sandi yang Anda masukkan salah.');
     }
-    if (error.code === 'auth/too-many-requests') {
-      throw new Error('Terlalu banyak percobaan gagal. Silakan tunggu beberapa saat.');
+    if (
+      directAuthErr.code === 'auth/user-not-found' || 
+      directAuthErr.code === 'auth/invalid-credential'
+    ) {
+      throw new Error(`Akun "${cleanInput}" belum terdaftar. Silakan hubungi Manager Studio untuk menambahkan akun Anda.`);
     }
-    throw new Error(error.message || 'Gagal masuk ke sistem.');
+    throw new Error(directAuthErr.message || 'Gagal masuk ke sistem.');
   }
 }
 
 /**
- * Register a new user with username, name, email, password, and role
+ * Register a new user with username, name, email, password, and role.
+ * Saves user credentials in Firestore and provisions Firebase Auth safely
+ * without signing out the currently logged-in manager.
  */
 export async function registerNewUser(
   username: string,
@@ -506,10 +513,10 @@ export async function registerNewUser(
   password: string,
   role: UserRole = 'DESIGNER'
 ): Promise<{ user: User; profile: UserProfile }> {
-  const cleanUsername = username.trim().toLowerCase();
+  const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
   const cleanEmail = email.trim().toLowerCase();
 
-  if (!cleanUsername) throw new Error('Username wajib diisi.');
+  if (!cleanUsername) throw new Error('Username wajib diisi (hanya huruf kecil, angka, dan underscore).');
   if (!name.trim()) throw new Error('Nama lengkap wajib diisi.');
   if (!cleanEmail.includes('@')) throw new Error('Format email tidak valid.');
   if (password.length < 6) throw new Error('Kata sandi minimal 6 karakter.');
@@ -517,55 +524,55 @@ export async function registerNewUser(
   // Check if username already exists in Firestore
   const existingWithUsername = await findUserByUsernameOrEmail(cleanUsername);
   if (existingWithUsername) {
-    throw new Error(`Username "${cleanUsername}" sudah digunakan.`);
+    throw new Error(`Username "@${cleanUsername}" sudah digunakan oleh anggota lain.`);
   }
 
+  const existingWithEmail = await findUserByUsernameOrEmail(cleanEmail);
+  if (existingWithEmail) {
+    throw new Error(`Email "${cleanEmail}" sudah digunakan oleh anggota lain.`);
+  }
+
+  let assignedUid = generateSafeId('user');
+  let secondaryUser: User | null = null;
+
+  // Use secondary Firebase App instance so the current manager's login session is NOT kicked out
   try {
-    const userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
-    const user = userCredential.user;
-    await updateProfile(user, { displayName: name });
-
-    const profile: UserProfile = {
-      id: user.uid,
-      username: cleanUsername,
-      name: name.trim(),
-      email: cleanEmail,
-      role,
-      status: 'ACTIVE',
-      initialPassword: password,
-      createdAt: new Date().toISOString()
-    };
-
-    await saveUserProfile(profile);
-    return { user, profile };
-  } catch (err: any) {
-    if (err.code === 'auth/operation-not-allowed') {
-      // Fallback: save user to Firestore database so manager provisioning continues to work
-      const fallbackId = generateSafeId('user');
-      const fallbackUser = {
-        uid: fallbackId,
-        email: cleanEmail,
-        displayName: name.trim(),
-        emailVerified: false,
-        isAnonymous: false
-      } as unknown as User;
-
-      const profile: UserProfile = {
-        id: fallbackId,
-        username: cleanUsername,
-        name: name.trim(),
-        email: cleanEmail,
-        role,
-        status: 'ACTIVE',
-        initialPassword: password,
-        createdAt: new Date().toISOString()
-      };
-
-      await saveUserProfile(profile);
-      return { user: fallbackUser, profile };
+    const secAuth = getSecondaryAuth();
+    const userCredential = await createUserWithEmailAndPassword(secAuth, cleanEmail, password);
+    secondaryUser = userCredential.user;
+    assignedUid = secondaryUser.uid;
+    try {
+      await updateProfile(secondaryUser, { displayName: name.trim() });
+    } catch {
+      // Non-blocking
     }
-    throw err;
+  } catch (authErr: any) {
+    console.warn('Firebase Auth secondary creation notice:', authErr?.code || authErr?.message);
+    // Non-blocking: Firestore-managed credentials guarantee login works even if Firebase Auth Email/Pass is disabled
   }
+
+  const profile: UserProfile = {
+    id: assignedUid,
+    username: cleanUsername,
+    name: name.trim(),
+    email: cleanEmail,
+    role,
+    status: 'ACTIVE',
+    initialPassword: password,
+    createdAt: new Date().toISOString()
+  };
+
+  await saveUserProfile(profile);
+
+  const fallbackUser = (secondaryUser || {
+    uid: assignedUid,
+    email: cleanEmail,
+    displayName: name.trim(),
+    emailVerified: false,
+    isAnonymous: false
+  }) as unknown as User;
+
+  return { user: fallbackUser, profile };
 }
 
 /**

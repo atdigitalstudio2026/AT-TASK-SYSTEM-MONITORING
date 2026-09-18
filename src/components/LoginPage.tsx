@@ -30,12 +30,14 @@ interface LoginPageProps {
   onLoginSuccess: (profile: UserProfile | null) => void;
   isDarkTheme: boolean;
   onToggleTheme: () => void;
+  users?: UserProfile[];
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({
   onLoginSuccess,
   isDarkTheme,
-  onToggleTheme
+  onToggleTheme,
+  users = []
 }) => {
   const [usernameOrEmail, setUsernameOrEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -448,31 +450,58 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               isDarkTheme ? 'bg-stone-900 border-stone-800 text-stone-300' : 'bg-white border-slate-200 text-slate-700 shadow-xs'
             }`}>
               <div className="font-bold text-[11px] uppercase tracking-wider text-amber-500">
-                Pilih Akun Pengujian (Klik untuk Isi Otomatis):
+                Pilih Akun Tim Studio (Klik untuk Isi Otomatis):
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                <button
-                  type="button"
-                  onClick={() => fillCredentials('admin', 'admin123456')}
-                  className={`p-2.5 rounded-lg border text-left transition flex flex-col gap-0.5 cursor-pointer ${
-                    isDarkTheme ? 'bg-stone-800 border-stone-700 hover:border-amber-500' : 'bg-slate-50 border-slate-200 hover:border-amber-500'
-                  }`}
-                >
-                  <span className="font-bold text-amber-600 dark:text-amber-400">Marcus Vance (Manager)</span>
-                  <span className="text-[10px] text-slate-400">Username: admin</span>
-                  <span className="text-[10px] text-slate-400">Sandi: admin123456</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => fillCredentials('elena', 'designer123')}
-                  className={`p-2.5 rounded-lg border text-left transition flex flex-col gap-0.5 cursor-pointer ${
-                    isDarkTheme ? 'bg-stone-800 border-stone-700 hover:border-indigo-500' : 'bg-slate-50 border-slate-200 hover:border-indigo-500'
-                  }`}
-                >
-                  <span className="font-bold text-indigo-600 dark:text-indigo-400">Elena Rostova (Desainer)</span>
-                  <span className="text-[10px] text-slate-400">Username: elena</span>
-                  <span className="text-[10px] text-slate-400">Sandi: designer123</span>
-                </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] max-h-56 overflow-y-auto pr-1">
+                {(() => {
+                  const defaultAccounts = [
+                    { name: 'Andi Triyanto', username: 'andi', role: 'MANAGER', password: 'admin123456' },
+                    { name: 'Havidh Adian Saputra', username: 'havidh', role: 'DESIGNER', password: 'designer123' },
+                    { name: 'Dara Kinanti', username: 'dara', role: 'DESIGNER', password: 'designer123' },
+                    { name: 'Azhar bayu Aji', username: 'azhar', role: 'CONTENT_CREATOR', password: 'designer123' },
+                  ];
+
+                  const accountsToRender = (users && users.length > 0)
+                    ? users.map(u => ({
+                        name: u.name,
+                        username: u.username || u.email.split('@')[0],
+                        role: u.role,
+                        password: u.initialPassword || (u.role === 'MANAGER' || u.role === 'ADMIN' ? 'admin123456' : 'designer123')
+                      }))
+                    : defaultAccounts;
+
+                  return accountsToRender.map((acc, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => fillCredentials(acc.username, acc.password)}
+                      className={`p-2.5 rounded-lg border text-left transition flex flex-col gap-0.5 cursor-pointer text-left ${
+                        acc.role === 'MANAGER' || acc.role === 'ADMIN'
+                          ? isDarkTheme 
+                            ? 'bg-stone-800/80 border-stone-700 hover:border-amber-500' 
+                            : 'bg-amber-50/50 border-amber-200 hover:border-amber-500'
+                          : isDarkTheme
+                            ? 'bg-stone-800/80 border-stone-700 hover:border-indigo-500'
+                            : 'bg-slate-50 border-slate-200 hover:border-indigo-500'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span className={`font-bold truncate ${
+                          acc.role === 'MANAGER' || acc.role === 'ADMIN'
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-indigo-600 dark:text-indigo-400'
+                        }`}>
+                          {acc.name}
+                        </span>
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-200/60 dark:bg-stone-700 text-slate-600 dark:text-stone-300 font-mono">
+                          {acc.role === 'MANAGER' || acc.role === 'ADMIN' ? 'Manager' : 'Desainer'}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-slate-500 dark:text-stone-400 font-mono">User: @{acc.username}</span>
+                      <span className="text-[10px] text-slate-500 dark:text-stone-400 font-mono">Sandi: {acc.password}</span>
+                    </button>
+                  ));
+                })()}
               </div>
             </div>
           )}
