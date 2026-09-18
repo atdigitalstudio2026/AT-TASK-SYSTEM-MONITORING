@@ -1,0 +1,122 @@
+{
+  "entities": {
+    "Task": {
+      "title": "Task",
+      "description": "Design and creative workflow task",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "taskCode": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "maxLength": 256 },
+        "projectId": { "type": "string", "maxLength": 128 },
+        "projectName": { "type": "string", "maxLength": 256 },
+        "categoryId": { "type": "string", "maxLength": 128 },
+        "categoryName": { "type": "string", "maxLength": 256 },
+        "taskType": { "type": "string", "maxLength": 128 },
+        "requester": { "type": "string", "maxLength": 128 },
+        "assignedUserId": { "type": "string", "maxLength": 128 },
+        "assignedUserName": { "type": "string", "maxLength": 256 },
+        "priority": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "URGENT"] },
+        "status": { "type": "string", "enum": ["DRAFT", "ASSIGNED", "IN_PROGRESS", "SUBMITTED", "UNDER_REVIEW", "REVISION", "APPROVED", "COMPLETED", "ON_HOLD", "CANCELLED"] },
+        "createdDate": { "type": "string" },
+        "deadline": { "type": "string" },
+        "designBrief": { "type": "string", "maxLength": 5000 },
+        "figmaUrl": { "type": "string", "maxLength": 1000 },
+        "assetsUrl": { "type": "string", "maxLength": 1000 },
+        "specsDimensions": { "type": "string", "maxLength": 256 },
+        "fileFormat": { "type": "string", "maxLength": 128 },
+        "checklist": { "type": "array" },
+        "comments": { "type": "array" },
+        "revisionCount": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "taskCode", "title", "projectId", "status"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "Creative campaign or brand project",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 256 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "color": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Task design or content category",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 256 },
+        "type": { "type": "string", "enum": ["DESIGN", "CONTENT", "BOTH"] }
+      },
+      "required": ["id", "name", "type"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Notification message for user activity",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 256 },
+        "message": { "type": "string", "maxLength": 1000 },
+        "type": { "type": "string" },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "title", "message"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Application user profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 256 },
+        "email": { "type": "string", "maxLength": 256 },
+        "role": { "type": "string", "enum": ["ADMIN", "MANAGER", "DESIGNER", "CONTENT_CREATOR"] },
+        "avatar": { "type": "string", "maxLength": 512 }
+      },
+      "required": ["id", "name", "email", "role"]
+    },
+    "Test": {
+      "title": "Test",
+      "description": "Firestore connection probe",
+      "type": "object",
+      "properties": {
+        "connected": { "type": "boolean" }
+      }
+    }
+  },
+  "firestore": {
+    "/tasks/{taskId}": {
+      "schema": "#/entities/Task",
+      "description": "Stores design tasks and their relational workflow items"
+    },
+    "/projects/{projectId}": {
+      "schema": "#/entities/Project",
+      "description": "Brand and campaign projects"
+    },
+    "/categories/{categoryId}": {
+      "schema": "#/entities/Category",
+      "description": "Creative categories"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "#/entities/Notification",
+      "description": "User notification alerts"
+    },
+    "/users/{userId}": {
+      "schema": "#/entities/User",
+      "description": "User profiles and role information"
+    },
+    "/test/{testId}": {
+      "schema": "#/entities/Test",
+      "description": "Connectivity test documents"
+    }
+  }
+}

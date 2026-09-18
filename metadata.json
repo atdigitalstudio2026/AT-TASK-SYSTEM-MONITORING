@@ -1,0 +1,6 @@
+{
+  "name": "AT - Task System Control",
+  "description": "AT - Task System Control: Design & Creative Task Management System to track tasks from creation to approval.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
