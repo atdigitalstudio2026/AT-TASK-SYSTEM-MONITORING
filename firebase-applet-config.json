@@ -1,12 +1,12 @@
 {
-  "projectId": "indigo-gear-cds98",
-  "appId": "1:110100391669:web:23814edc3539069af4c7bc",
-  "apiKey": "AIzaSyABr5rf80aPw-gCTiM0rwRhRx7vp8C1dDc",
-  "authDomain": "indigo-gear-cds98.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-atdesigntaskmana-dc812167-fd74-464d-a42a-2087d1754dde",
-  "storageBucket": "indigo-gear-cds98.firebasestorage.app",
-  "messagingSenderId": "110100391669",
+  "projectId": "nifty-byte-32ts5",
+  "appId": "1:1058510512848:web:4b266054164f23047634d5",
+  "apiKey": "AIzaSyBRl1L-lJvu8Xdeg80O9nX_siGlSSGcENg",
+  "authDomain": "nifty-byte-32ts5.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-attasksystemcont-a345bf76-fa8c-4855-bd62-c1e9a691e11e",
+  "storageBucket": "nifty-byte-32ts5.firebasestorage.app",
+  "messagingSenderId": "1058510512848",
   "measurementId": "",
-  "oAuthClientId": "110100391669-u2e1n4o2dgm8edagjkdrcpv8k862ivnf.apps.googleusercontent.com",
+  "oAuthClientId": "1058510512848-sumhl003t5b2nqqg752ht5v0ulsfj01v.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

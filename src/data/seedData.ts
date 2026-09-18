@@ -48,31 +48,47 @@ export const INITIAL_CATEGORIES: Category[] = [
 export const INITIAL_USERS: UserProfile[] = [
   {
     id: 'user_marcus',
-    name: 'Marcus Vance',
-    email: 'marcus.creative@atstudio.internal',
+    username: 'admin',
+    name: 'Marcus Vance (Manager)',
+    email: 'admin@atstudio.internal',
     role: 'MANAGER',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'
+    status: 'ACTIVE',
+    initialPassword: 'admin123456',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+    createdAt: new Date().toISOString()
   },
   {
     id: 'user_elena',
+    username: 'elena',
     name: 'Elena Rostova',
     email: 'elena.design@atstudio.internal',
     role: 'DESIGNER',
-    avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80'
+    status: 'ACTIVE',
+    initialPassword: 'designer123',
+    avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
+    createdAt: new Date().toISOString()
   },
   {
     id: 'user_kai',
+    username: 'kai',
     name: 'Kai Nakamura',
     email: 'kai.3d@atstudio.internal',
     role: 'DESIGNER',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80'
+    status: 'ACTIVE',
+    initialPassword: 'designer123',
+    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+    createdAt: new Date().toISOString()
   },
   {
     id: 'user_sophia',
+    username: 'sophia',
     name: 'Sophia Chen',
     email: 'sophia.content@atstudio.internal',
     role: 'CONTENT_CREATOR',
-    avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80'
+    status: 'ACTIVE',
+    initialPassword: 'content123',
+    avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
+    createdAt: new Date().toISOString()
   }
 ];
 

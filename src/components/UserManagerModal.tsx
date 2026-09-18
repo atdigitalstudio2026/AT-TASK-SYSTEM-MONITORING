@@ -17,7 +17,10 @@ import {
   FileText, 
   Mail, 
   Search,
-  AlertTriangle
+  AlertTriangle,
+  KeyRound,
+  Copy,
+  CheckCheck
 } from 'lucide-react';
 import { UserProfile, UserRole, Task } from '../types';
 import { generateSafeId } from '../firebase';
@@ -29,6 +32,9 @@ interface UserManagerModalProps {
   tasks: Task[];
   onSaveUser: (user: UserProfile) => Promise<void>;
   onDeleteUser: (userId: string) => Promise<void>;
+  onRegisterAuthUser?: (username: string, name: string, email: string, pass: string, role: UserRole) => Promise<void>;
+  onResetUserPassword?: (userId: string, newPass: string) => Promise<void>;
+  currentUserRole?: UserRole;
   isDarkTheme?: boolean;
 }
 
@@ -39,8 +45,12 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
   tasks,
   onSaveUser,
   onDeleteUser,
+  onRegisterAuthUser,
+  onResetUserPassword,
+  currentUserRole = 'MANAGER',
   isDarkTheme = false
 }) => {
+  const isManager = currentUserRole === 'ADMIN' || currentUserRole === 'MANAGER';
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('ALL');
 
@@ -48,22 +58,62 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
   const [isAdding, setIsAdding] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   
+  const [formUsername, setFormUsername] = useState('');
   const [formName, setFormName] = useState('');
   const [formEmail, setFormEmail] = useState('');
+  const [formPassword, setFormPassword] = useState('');
   const [formRole, setFormRole] = useState<UserRole>('DESIGNER');
+  const [formStatus, setFormStatus] = useState<'ACTIVE' | 'INACTIVE'>('ACTIVE');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [copiedUserId, setCopiedUserId] = useState<string | null>(null);
+  const [resettingUserId, setResettingUserId] = useState<string | null>(null);
+  const [resetNewPassword, setResetNewPassword] = useState<string>('');
+  const [isResettingSubmitting, setIsResettingSubmitting] = useState(false);
 
   if (!isOpen) return null;
 
+  const handleCopyCredentials = (user: UserProfile) => {
+    const text = `Portal: AT Digital Studio\nNama: ${user.name}\nUsername: ${user.username || user.email.split('@')[0]}\nEmail: ${user.email}\nPeran: ${user.role === 'ADMIN' || user.role === 'MANAGER' ? 'Manager Studio' : 'Desainer Grafis'}\nPassword: ${user.initialPassword || '(Gunakan kata sandi yang telah ditentukan)'}\n\nSilakan masuk melalui form login di web studio.`;
+    navigator.clipboard.writeText(text);
+    setCopiedUserId(user.id);
+    setTimeout(() => setCopiedUserId(null), 2500);
+  };
+
+  const handleResetPasswordSubmit = async (userId: string) => {
+    if (!resetNewPassword || resetNewPassword.length < 6) {
+      setErrorMessage('Kata sandi baru minimal 6 karakter.');
+      return;
+    }
+    setIsResettingSubmitting(true);
+    setErrorMessage(null);
+    try {
+      if (onResetUserPassword) {
+        await onResetUserPassword(userId, resetNewPassword);
+      }
+      setSuccessMessage('Kata sandi pengguna berhasil diperbarui!');
+      setResettingUserId(null);
+      setResetNewPassword('');
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Gagal mereset kata sandi.');
+    } finally {
+      setIsResettingSubmitting(false);
+    }
+  };
+
   const resetForm = () => {
+    setFormUsername('');
     setFormName('');
     setFormEmail('');
+    setFormPassword('');
     setFormRole('DESIGNER');
+    setFormStatus('ACTIVE');
     setIsAdding(false);
     setEditingUserId(null);
     setErrorMessage(null);
+    setSuccessMessage(null);
   };
 
   const handleStartAdd = () => {
@@ -73,21 +123,34 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
 
   const handleStartEdit = (user: UserProfile) => {
     setEditingUserId(user.id);
+    setFormUsername(user.username || user.email.split('@')[0]);
     setFormName(user.name);
     setFormEmail(user.email);
+    setFormPassword('');
     setFormRole(user.role);
+    setFormStatus(user.status || 'ACTIVE');
     setIsAdding(false);
     setErrorMessage(null);
+    setSuccessMessage(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isManager) {
+      setErrorMessage('Hanya Manager/Administrator yang memiliki hak akses untuk mengedit pengguna.');
+      return;
+    }
+
+    if (!formUsername.trim()) {
+      setErrorMessage('Username login wajib diisi.');
+      return;
+    }
     if (!formName.trim()) {
-      setErrorMessage('Nama pengguna wajib diisi');
+      setErrorMessage('Nama pengguna wajib diisi.');
       return;
     }
     if (!formEmail.trim() || !formEmail.includes('@')) {
-      setErrorMessage('Format email tidak valid');
+      setErrorMessage('Format email tidak valid.');
       return;
     }
 
@@ -100,25 +163,42 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
         const existing = users.find(u => u.id === editingUserId);
         const updated: UserProfile = {
           id: editingUserId,
+          username: formUsername.trim().toLowerCase().replace(/[^a-z0-9_]/g, ''),
           name: formName.trim(),
-          email: formEmail.trim(),
+          email: formEmail.trim().toLowerCase(),
           role: formRole,
-          avatar: existing?.avatar
+          status: formStatus,
+          avatar: existing?.avatar,
+          createdAt: existing?.createdAt || new Date().toISOString()
         };
         await onSaveUser(updated);
+        setSuccessMessage(`Data pengguna ${updated.name} berhasil diperbarui.`);
       } else {
         // Create new user
-        const newUser: UserProfile = {
-          id: generateSafeId('user'),
-          name: formName.trim(),
-          email: formEmail.trim(),
-          role: formRole
-        };
-        await onSaveUser(newUser);
+        const cleanUser = formUsername.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+        const pass = formPassword.trim() || 'studio123';
+
+        if (onRegisterAuthUser) {
+          await onRegisterAuthUser(cleanUser, formName.trim(), formEmail.trim().toLowerCase(), pass, formRole);
+        } else {
+          const newUser: UserProfile = {
+            id: generateSafeId('user'),
+            username: cleanUser,
+            name: formName.trim(),
+            email: formEmail.trim().toLowerCase(),
+            role: formRole,
+            status: formStatus,
+            createdAt: new Date().toISOString()
+          };
+          await onSaveUser(newUser);
+        }
+        setSuccessMessage(`Pengguna baru ${formName} berhasil dibuat dengan password awal: ${pass}`);
       }
-      resetForm();
+      setTimeout(() => {
+        resetForm();
+      }, 1200);
     } catch (err: any) {
-      setErrorMessage(err?.message || 'Gagal menyimpan data pengguna');
+      setErrorMessage(err?.message || 'Gagal menyimpan data pengguna.');
     } finally {
       setIsSubmitting(false);
     }
@@ -215,6 +295,26 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
         {/* Content Area */}
         <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5">
 
+          {/* Manager Authority Banner */}
+          <div className={`p-3.5 rounded-xl border flex items-start gap-3 ${
+            isDarkTheme 
+              ? 'bg-amber-500/10 border-amber-500/30 text-amber-200' 
+              : 'bg-amber-50 border-amber-200 text-amber-900'
+          }`}>
+            <div className="w-7 h-7 rounded-lg bg-amber-500 text-stone-950 flex items-center justify-center font-bold text-sm shrink-0">
+              👑
+            </div>
+            <div className="text-xs">
+              <div className="font-bold flex items-center gap-1.5">
+                Pusat Kontrol Akses Manager / Administrator
+                <span className="text-[10px] bg-amber-500 text-stone-950 font-extrabold px-1.5 py-0.2 rounded-sm">KONTROL PENUH</span>
+              </div>
+              <p className="text-[11px] opacity-90 mt-0.5 leading-relaxed">
+                Manager memegang kendali penuh atas kredensial masuk (Username & Password), pemberian peran (Designer / Admin / Content Creator), status aktif pengguna, serta pendelegasian seluruh job kreatif.
+              </p>
+            </div>
+          </div>
+
           {/* Action & Filter Bar */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2 flex-1">
@@ -286,8 +386,32 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
                 </div>
               )}
 
+              {successMessage && (
+                <div className="mb-3 p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs flex items-center gap-2">
+                  <Check className="w-3.5 h-3.5 shrink-0" />
+                  <span>{successMessage}</span>
+                </div>
+              )}
+
               <form onSubmit={handleSubmit} className="space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {/* Username */}
+                  <div>
+                    <label className={`block text-[11px] font-bold mb-1 ${isDarkTheme ? 'text-stone-300' : 'text-slate-700'}`}>
+                      Username Login *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="misal: andi_design"
+                      value={formUsername}
+                      onChange={(e) => setFormUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                      className={`w-full px-3 py-1.5 text-xs rounded-lg border transition ${
+                        isDarkTheme ? 'bg-stone-900 border-stone-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                      }`}
+                    />
+                  </div>
+
                   {/* Name */}
                   <div>
                     <label className={`block text-[11px] font-bold mb-1 ${isDarkTheme ? 'text-stone-300' : 'text-slate-700'}`}>
@@ -296,7 +420,7 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
                     <input
                       type="text"
                       required
-                      placeholder="Misal: Sarah Wijaya"
+                      placeholder="Misal: Andi Pratama"
                       value={formName}
                       onChange={(e) => setFormName(e.target.value)}
                       className={`w-full px-3 py-1.5 text-xs rounded-lg border transition ${
@@ -313,7 +437,7 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
                     <input
                       type="email"
                       required
-                      placeholder="sarah@atdigitalstudio.com"
+                      placeholder="andi@atdigitalstudio.com"
                       value={formEmail}
                       onChange={(e) => setFormEmail(e.target.value)}
                       className={`w-full px-3 py-1.5 text-xs rounded-lg border transition ${
@@ -322,6 +446,24 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
                     />
                   </div>
 
+                  {/* Password */}
+                  <div>
+                    <label className={`block text-[11px] font-bold mb-1 ${isDarkTheme ? 'text-stone-300' : 'text-slate-700'}`}>
+                      {editingUserId ? 'Ubah Password (opsional)' : 'Password Awal *'}
+                    </label>
+                    <input
+                      type="password"
+                      placeholder={editingUserId ? 'Kosongkan jika tak diubah' : 'Minimal 6 karakter'}
+                      value={formPassword}
+                      onChange={(e) => setFormPassword(e.target.value)}
+                      className={`w-full px-3 py-1.5 text-xs rounded-lg border transition ${
+                        isDarkTheme ? 'bg-stone-900 border-stone-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                      }`}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {/* Role */}
                   <div>
                     <label className={`block text-[11px] font-bold mb-1 ${isDarkTheme ? 'text-stone-300' : 'text-slate-700'}`}>
@@ -334,10 +476,27 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
                         isDarkTheme ? 'bg-stone-900 border-stone-700 text-white' : 'bg-white border-slate-300 text-slate-900'
                       }`}
                     >
-                      <option value="DESIGNER">Graphic Designer</option>
-                      <option value="CONTENT_CREATOR">Content Creator</option>
-                      <option value="MANAGER">Project Manager</option>
-                      <option value="ADMIN">Admin Studio</option>
+                      <option value="DESIGNER">Graphic Designer (Desainer Grafis)</option>
+                      <option value="CONTENT_CREATOR">Content Creator (Pembuat Konten)</option>
+                      <option value="MANAGER">Project Manager (Kontrol Manajerial)</option>
+                      <option value="ADMIN">Admin Studio (Kontrol Penuh Super Admin)</option>
+                    </select>
+                  </div>
+
+                  {/* Status */}
+                  <div>
+                    <label className={`block text-[11px] font-bold mb-1 ${isDarkTheme ? 'text-stone-300' : 'text-slate-700'}`}>
+                      Status Akun
+                    </label>
+                    <select
+                      value={formStatus}
+                      onChange={(e) => setFormStatus(e.target.value as 'ACTIVE' | 'INACTIVE')}
+                      className={`w-full px-3 py-1.5 text-xs rounded-lg border transition ${
+                        isDarkTheme ? 'bg-stone-900 border-stone-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                      }`}
+                    >
+                      <option value="ACTIVE">Aktif (Bisa Login & Mengerjakan Tugas)</option>
+                      <option value="INACTIVE">Nonaktif (Akses Masuk Dinonaktifkan)</option>
                     </select>
                   </div>
                 </div>
@@ -346,14 +505,14 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
                   <button
                     type="button"
                     onClick={resetForm}
-                    className="px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-500 hover:text-slate-700 transition"
+                    className="px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-500 hover:text-slate-700 transition cursor-pointer"
                   >
                     Batal
                   </button>
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition flex items-center gap-1.5 shadow-xs"
+                    className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition flex items-center gap-1.5 shadow-xs cursor-pointer"
                   >
                     <Check className="w-3.5 h-3.5" />
                     <span>{editingUserId ? 'Simpan Perubahan' : 'Tambahkan Pengguna'}</span>
@@ -372,9 +531,10 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
                 <tr className={`border-b ${
                   isDarkTheme ? 'bg-stone-950 text-stone-400 border-stone-800' : 'bg-slate-100/90 text-slate-600 border-slate-200'
                 }`}>
-                  <th className="py-2.5 px-3">Pengguna</th>
-                  <th className="py-2.5 px-3">Peran / Role</th>
-                  <th className="py-2.5 px-3 text-center">Tugas Aktif</th>
+                  <th className="py-2.5 px-3">Pengguna & Username</th>
+                  <th className="py-2.5 px-3">Peran / Hak Akses</th>
+                  <th className="py-2.5 px-3 text-center">Status</th>
+                  <th className="py-2.5 px-3 text-center">Beban Tugas</th>
                   <th className="py-2.5 px-3 text-right">Aksi</th>
                 </tr>
               </thead>
@@ -383,28 +543,38 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
                   const assignedTasks = tasks.filter(t => t.assignedUserId === user.id);
                   const activeTasks = assignedTasks.filter(t => t.status !== 'COMPLETED' && t.status !== 'APPROVED');
                   const roleBadge = getRoleBadge(user.role);
+                  const isActive = user.status !== 'INACTIVE';
 
                   return (
-                    <tr 
-                      key={user.id}
-                      className={`transition ${
-                        isDarkTheme ? 'hover:bg-stone-850/50' : 'hover:bg-slate-50/80'
-                      }`}
-                    >
-                      {/* Name & Email */}
+                    <React.Fragment key={user.id}>
+                      <tr 
+                        className={`transition ${
+                          isDarkTheme ? 'hover:bg-stone-850/50' : 'hover:bg-slate-50/80'
+                        }`}
+                      >
+                      {/* Name & Email & Username */}
                       <td className="py-3 px-3">
                         <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-full bg-indigo-100 border border-indigo-300 dark:bg-indigo-950/60 dark:border-indigo-800 flex items-center justify-center text-xs font-bold text-indigo-700 dark:text-indigo-300">
+                          <div className="w-8 h-8 rounded-full bg-indigo-100 border border-indigo-300 dark:bg-indigo-950/60 dark:border-indigo-800 flex items-center justify-center text-xs font-bold text-indigo-700 dark:text-indigo-300 shrink-0">
                             {user.name.charAt(0).toUpperCase()}
                           </div>
                           <div>
                             <div className="font-bold flex items-center gap-1.5">
                               {user.name}
+                              <span className="font-mono text-[10px] bg-slate-100 dark:bg-stone-800 px-1.5 py-0.5 rounded text-slate-600 dark:text-stone-300">
+                                @{user.username || user.email.split('@')[0]}
+                              </span>
                             </div>
                             <div className="text-[11px] text-slate-400 flex items-center gap-1">
                               <Mail className="w-2.5 h-2.5" />
                               {user.email}
                             </div>
+                            {user.initialPassword && (
+                              <div className="text-[10.5px] text-amber-600 dark:text-amber-400 font-mono flex items-center gap-1 mt-0.5" title="Kata sandi yang diberikan manager">
+                                <KeyRound className="w-3 h-3" />
+                                <span>Sandi: {user.initialPassword}</span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -414,6 +584,18 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
                         <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10.5px] font-bold border ${roleBadge.classes}`}>
                           {roleBadge.icon}
                           {roleBadge.label}
+                        </span>
+                      </td>
+
+                      {/* Status */}
+                      <td className="py-3 px-3 text-center">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          isActive 
+                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300' 
+                            : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-400'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-stone-400'}`} />
+                          {isActive ? 'Aktif' : 'Nonaktif'}
                         </span>
                       </td>
 
@@ -450,8 +632,48 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
                         ) : (
                           <div className="inline-flex items-center gap-1">
                             <button
+                              onClick={() => handleCopyCredentials(user)}
+                              title="Salin Kredensial Login (Username & Kata Sandi) untuk Dibagikan ke Desainer"
+                              className={`p-1.5 rounded-lg border transition ${
+                                copiedUserId === user.id
+                                  ? 'border-emerald-500 bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400'
+                                  : isDarkTheme 
+                                    ? 'border-stone-700 hover:bg-stone-800 text-stone-300' 
+                                    : 'border-slate-200 hover:bg-slate-100 text-slate-600'
+                              }`}
+                            >
+                              {copiedUserId === user.id ? (
+                                <CheckCheck className="w-3.5 h-3.5 text-emerald-500" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5 text-amber-500" />
+                              )}
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                if (resettingUserId === user.id) {
+                                  setResettingUserId(null);
+                                  setResetNewPassword('');
+                                } else {
+                                  setResettingUserId(user.id);
+                                  setResetNewPassword('');
+                                }
+                              }}
+                              title="Reset / Berikan Kata Sandi Baru"
+                              className={`p-1.5 rounded-lg border transition ${
+                                resettingUserId === user.id
+                                  ? 'border-indigo-500 bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400'
+                                  : isDarkTheme 
+                                    ? 'border-stone-700 hover:bg-stone-800 text-stone-300' 
+                                    : 'border-slate-200 hover:bg-slate-100 text-slate-600'
+                              }`}
+                            >
+                              <KeyRound className="w-3.5 h-3.5 text-indigo-500" />
+                            </button>
+
+                            <button
                               onClick={() => handleStartEdit(user)}
-                              title="Edit Pengguna"
+                              title="Edit Profil Pengguna"
                               className={`p-1.5 rounded-lg border transition ${
                                 isDarkTheme 
                                   ? 'border-stone-700 hover:bg-stone-800 text-stone-300' 
@@ -476,6 +698,54 @@ export const UserManagerModal: React.FC<UserManagerModalProps> = ({
                         )}
                       </td>
                     </tr>
+
+                    {/* Reset Password Form Sub-Row */}
+                    {resettingUserId === user.id && (
+                      <tr className={`border-b ${
+                        isDarkTheme ? 'bg-indigo-950/30 border-stone-800' : 'bg-indigo-50/70 border-slate-200'
+                      }`}>
+                        <td colSpan={5} className="py-2.5 px-4">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <KeyRound className="w-4 h-4 text-indigo-500" />
+                              <span className="text-xs font-bold">
+                                Atur Kata Sandi Baru untuk <span className="font-mono text-indigo-600 dark:text-indigo-400">@{user.username || user.name}</span>:
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                placeholder="Kata sandi baru (min. 6 karakter)"
+                                value={resetNewPassword}
+                                onChange={(e) => setResetNewPassword(e.target.value)}
+                                className={`px-2.5 py-1 text-xs rounded-lg border ${
+                                  isDarkTheme ? 'bg-stone-900 border-stone-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                                }`}
+                              />
+                              <button
+                                type="button"
+                                disabled={isResettingSubmitting || resetNewPassword.length < 6}
+                                onClick={() => handleResetPasswordSubmit(user.id)}
+                                className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition"
+                              >
+                                {isResettingSubmitting ? 'Menyimpan...' : 'Simpan Sandi'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setResettingUserId(null);
+                                  setResetNewPassword('');
+                                }}
+                                className="px-2 py-1 text-xs text-slate-500 hover:text-slate-700 transition"
+                              >
+                                Batal
+                              </button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                   );
                 })}
 

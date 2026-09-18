@@ -31,7 +31,7 @@ import {
   FileText,
   Loader2
 } from 'lucide-react';
-import { Task, TaskStatus, TaskPriority, Project, TaskChecklistItem, TaskComment } from '../types';
+import { Task, TaskStatus, TaskPriority, Project, TaskChecklistItem, TaskComment, UserProfile } from '../types';
 import { generateSafeId } from '../firebase';
 
 interface TaskDetailDrawerProps {
@@ -44,6 +44,7 @@ interface TaskDetailDrawerProps {
   onDuplicate?: (task: Task) => void;
   onStatusChange: (taskId: string, newStatus: TaskStatus, revisionNote?: string) => void;
   onUpdateTask?: (taskId: string, updates: Partial<Task>) => Promise<void>;
+  currentProfile?: UserProfile | null;
   isDarkTheme?: boolean;
 }
 
@@ -57,6 +58,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
   onDuplicate,
   onStatusChange,
   onUpdateTask,
+  currentProfile,
   isDarkTheme = false
 }) => {
   const [copiedCode, setCopiedCode] = useState(false);
@@ -852,36 +854,39 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
           </div>
 
           {/* Delete confirmation section */}
-          <div className={`pt-4 border-t ${isDarkTheme ? 'border-stone-800' : 'border-slate-200'}`}>
-            {confirmDelete ? (
-              <div className="p-3 bg-rose-50 border border-rose-300 rounded-lg flex items-center justify-between gap-3">
-                <span className="text-xs text-rose-800 font-medium">Yakin hapus permanen tugas kreatif ini?</span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setConfirmDelete(false)}
-                    className="px-2.5 py-1 text-xs text-slate-600 hover:text-slate-900"
-                  >
-                    Batal
-                  </button>
-                  <button
-                    onClick={() => onDelete(task.id)}
-                    className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded"
-                  >
-                    Hapus
-                  </button>
+          {(!currentProfile || currentProfile.role === 'ADMIN' || currentProfile.role === 'MANAGER') && (
+            <div className={`pt-4 border-t ${isDarkTheme ? 'border-stone-800' : 'border-slate-200'}`}>
+              {confirmDelete ? (
+                <div className="p-3 bg-rose-50 border border-rose-300 rounded-lg flex items-center justify-between gap-3">
+                  <span className="text-xs text-rose-800 font-medium">Yakin hapus permanen tugas kreatif ini? (Tindakan Manager)</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setConfirmDelete(false)}
+                      className="px-2.5 py-1 text-xs text-slate-600 hover:text-slate-900"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      onClick={() => onDelete(task.id)}
+                      className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded"
+                    >
+                      Hapus
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <button
-                onClick={() => setConfirmDelete(true)}
-                className={`text-xs flex items-center gap-1.5 transition ${
-                  isDarkTheme ? 'text-stone-500 hover:text-rose-400' : 'text-slate-400 hover:text-rose-600'
-                }`}
-              >
-                <Trash2 className="w-3.5 h-3.5" /> Hapus tugas kreatif ini
-              </button>
-            )}
-          </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  className={`text-xs flex items-center gap-1.5 transition ${
+                    isDarkTheme ? 'text-stone-500 hover:text-rose-400' : 'text-slate-400 hover:text-rose-600'
+                  }`}
+                  title="Hanya Manager yang dapat menghapus tugas"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Hapus tugas kreatif ini (Khusus Manager)
+                </button>
+              )}
+            </div>
+          )}
 
         </div>
 

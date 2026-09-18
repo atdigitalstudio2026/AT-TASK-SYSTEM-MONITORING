@@ -77,9 +77,11 @@
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 64 },
         "name": { "type": "string", "maxLength": 256 },
         "email": { "type": "string", "maxLength": 256 },
         "role": { "type": "string", "enum": ["ADMIN", "MANAGER", "DESIGNER", "CONTENT_CREATOR"] },
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] },
         "avatar": { "type": "string", "maxLength": 512 }
       },
       "required": ["id", "name", "email", "role"]

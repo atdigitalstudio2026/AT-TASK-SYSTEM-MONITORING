@@ -90,10 +90,15 @@ export interface NotificationItem {
 
 export interface UserProfile {
   id: string;
+  username?: string;
   name: string;
   email: string;
   role: UserRole;
   avatar?: string;
+  status?: 'ACTIVE' | 'INACTIVE';
+  initialPassword?: string;
+  phone?: string;
+  createdAt?: string;
 }
 
 export interface FilterState {

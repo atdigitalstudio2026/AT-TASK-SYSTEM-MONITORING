@@ -27,6 +27,7 @@ interface TaskFiltersProps {
   projects: Project[];
   categories: Category[];
   users?: UserProfile[];
+  currentProfile?: UserProfile | null;
   totalResults: number;
   tasksToExport?: Task[];
   onOpenReport?: () => void;
@@ -39,6 +40,7 @@ export const TaskFilters: React.FC<TaskFiltersProps> = ({
   projects,
   categories,
   users = [],
+  currentProfile,
   totalResults,
   tasksToExport = [],
   onOpenReport,
@@ -292,13 +294,36 @@ export const TaskFilters: React.FC<TaskFiltersProps> = ({
           <button
             onClick={() => handleQuickPreset('all')}
             className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
-              !filters.status && !filters.priority 
+              !filters.status && !filters.priority && !filters.assignedUserId
                 ? 'bg-amber-500 text-white shadow-xs' 
                 : isDarkTheme ? 'bg-stone-800 text-stone-400 hover:text-stone-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
             Semua
           </button>
+
+          {/* Dedicated "Tugas Saya" Button */}
+          {currentProfile && (
+            <button
+              onClick={() => {
+                setFilters(prev => ({
+                  ...prev,
+                  assignedUserId: prev.assignedUserId === currentProfile.id ? '' : currentProfile.id
+                }));
+              }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 border ${
+                filters.assignedUserId === currentProfile.id
+                  ? 'bg-amber-500 text-stone-950 border-amber-400 shadow-xs ring-1 ring-amber-400/50'
+                  : isDarkTheme
+                    ? 'bg-stone-800/80 text-stone-300 border-stone-700 hover:bg-stone-800'
+                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+              }`}
+              title={`Filter hanya tugas untuk ${currentProfile.name}`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${filters.assignedUserId === currentProfile.id ? 'bg-stone-950' : 'bg-amber-400'}`} />
+              Tugas Saya ({currentProfile.username ? `@${currentProfile.username}` : currentProfile.name.split(' ')[0]})
+            </button>
+          )}
 
           <button
             onClick={() => handleQuickPreset('review')}

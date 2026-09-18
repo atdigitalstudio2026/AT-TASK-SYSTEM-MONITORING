@@ -25,7 +25,12 @@ import {
   saveUserProfile,
   removeUserProfile,
   clearAllStudioData,
-  generateSafeId
+  generateSafeId,
+  getUserProfile,
+  findUserByUsernameOrEmail,
+  registerNewUser,
+  resetUserPasswordAsManager,
+  signOutCurrentUser
 } from './firebase';
 import { 
   Task, 
@@ -33,6 +38,7 @@ import {
   Category, 
   NotificationItem, 
   UserProfile, 
+  UserRole,
   FilterState, 
   TaskStatus 
 } from './types';
@@ -58,11 +64,24 @@ import { StudioAnalyticsModal } from './components/StudioAnalyticsModal';
 import { StudioReportModal } from './components/StudioReportModal';
 import { UserManagerModal } from './components/UserManagerModal';
 import { ResetStudioModal } from './components/ResetStudioModal';
+import { AuthModal } from './components/AuthModal';
+import { LoginPage } from './components/LoginPage';
+import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { TaskCalendar } from './components/TaskCalendar';
-import { Sparkles, Plus, CheckCircle2 } from 'lucide-react';
+import { Sparkles, Plus, CheckCircle2, ShieldAlert } from 'lucide-react';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentProfile, setCurrentProfile] = useState<UserProfile | null>(() => {
+    const savedId = localStorage.getItem('at_current_user_id') || sessionStorage.getItem('at_current_user_id');
+    if (savedId) {
+      const found = INITIAL_USERS.find(u => u.id === savedId);
+      if (found) return found;
+    }
+    return null;
+  });
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState<boolean>(false);
   const [connectionHealthy, setConnectionHealthy] = useState<boolean>(false);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>(INITIAL_PROJECTS);
@@ -156,18 +175,38 @@ export default function App() {
       setConnectionHealthy(healthy);
     });
 
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
-        // Sync user profile into Firestore
-        const profile: UserProfile = {
-          id: user.uid,
-          name: user.displayName || user.email?.split('@')[0] || 'User',
-          email: user.email || '',
-          role: 'ADMIN',
-          avatar: user.photoURL || undefined
-        };
-        saveUserProfile(profile).catch(err => console.warn('User profile sync:', err));
+        try {
+          const profile = await getUserProfile(user.uid);
+          if (profile) {
+            setCurrentProfile(profile);
+            localStorage.setItem('at_current_user_id', profile.id);
+          } else {
+            const matched = await findUserByUsernameOrEmail(user.email || '');
+            if (matched) {
+              setCurrentProfile(matched);
+              localStorage.setItem('at_current_user_id', matched.id);
+            } else {
+              const fallbackProfile: UserProfile = {
+                id: user.uid,
+                username: user.email?.split('@')[0].toLowerCase().replace(/[^a-z0-9_]/g, '') || 'user',
+                name: user.displayName || user.email?.split('@')[0] || 'User',
+                email: user.email || '',
+                role: 'MANAGER',
+                status: 'ACTIVE',
+                avatar: user.photoURL || undefined,
+                createdAt: new Date().toISOString()
+              };
+              await saveUserProfile(fallbackProfile);
+              setCurrentProfile(fallbackProfile);
+              localStorage.setItem('at_current_user_id', fallbackProfile.id);
+            }
+          }
+        } catch (err) {
+          console.warn('User profile sync error:', err);
+        }
       }
     });
 
@@ -268,6 +307,16 @@ export default function App() {
           const loadedUsers: UserProfile[] = [];
           snapshot.forEach((doc) => loadedUsers.push(doc.data() as UserProfile));
           setUsers(loadedUsers);
+
+          // Refresh current profile if updated in Firestore
+          setCurrentProfile(prev => {
+            if (!prev) {
+              const defaultAdmin = loadedUsers.find(u => u.role === 'ADMIN' || u.role === 'MANAGER') || loadedUsers[0];
+              return defaultAdmin || null;
+            }
+            const found = loadedUsers.find(u => u.id === prev.id || (prev.username && u.username === prev.username));
+            return found || prev;
+          });
         }
       },
       (error) => {
@@ -283,6 +332,9 @@ export default function App() {
       unsubUsers();
     };
   }, []);
+
+  // Manager & Admin full control check
+  const isManager = currentProfile?.role === 'ADMIN' || currentProfile?.role === 'MANAGER';
 
   // Seed initial data handler
   const handleSeedInitialData = async () => {
@@ -319,6 +371,11 @@ export default function App() {
 
   // Reset Studio simulation data to 0
   const handleConfirmReset = async (wipeAll: boolean) => {
+    if (!isManager) {
+      showToast('Akses Dibatasi: Hanya Manager/Administrator yang berhak mereset sistem.');
+      return;
+    }
+
     try {
       localStorage.setItem('at_studio_cleared', 'true');
       await clearAllStudioData({ wipeAll });
@@ -337,8 +394,13 @@ export default function App() {
     }
   };
 
-  // User Management Handlers
+  // User Management Handlers (Full Manager Control)
   const handleSaveUser = async (userProfile: UserProfile) => {
+    if (!isManager) {
+      showToast('Akses Dibatasi: Hanya Manager yang dapat mengedit hak akses pengguna.');
+      return;
+    }
+
     await saveUserProfile(userProfile);
     setUsers(prev => {
       const idx = prev.findIndex(u => u.id === userProfile.id);
@@ -349,13 +411,54 @@ export default function App() {
       }
       return [...prev, userProfile];
     });
-    showToast(`Data anggota ${userProfile.name} berhasil disimpan.`);
+
+    if (currentProfile?.id === userProfile.id) {
+      setCurrentProfile(userProfile);
+    }
+    showToast(`Data anggota @${userProfile.username || userProfile.name} berhasil disimpan.`);
   };
 
   const handleDeleteUser = async (userId: string) => {
+    if (!isManager) {
+      showToast('Akses Dibatasi: Hanya Manager yang dapat menghapus akun pengguna.');
+      return;
+    }
+
     await removeUserProfile(userId);
     setUsers(prev => prev.filter(u => u.id !== userId));
     showToast('Akses pengguna berhasil dihapus dari sistem.');
+  };
+
+  // Register Auth User from Manager Panel
+  const handleRegisterAuthUser = async (
+    username: string,
+    name: string,
+    email: string,
+    pass: string,
+    role: UserRole
+  ) => {
+    if (!isManager) {
+      showToast('Akses Dibatasi: Hanya Manager yang dapat mendaftarkan akun baru.');
+      return;
+    }
+
+    const { profile } = await registerNewUser(username, name, email, pass, role);
+    setUsers(prev => [...prev.filter(u => u.id !== profile.id), profile]);
+    showToast(`Akun @${profile.username} (${profile.role}) berhasil didaftarkan ke Firebase.`);
+  };
+
+  // Sign out handler
+  const handleSignOut = async () => {
+    try {
+      await signOutCurrentUser();
+      setCurrentUser(null);
+      localStorage.removeItem('at_current_user_id');
+      sessionStorage.removeItem('at_current_user_id');
+      setCurrentProfile(null);
+      showToast('Berhasil keluar dari akun studio.');
+    } catch (err) {
+      console.error('Sign out error:', err);
+    }
   };
 
   // Add task with prefilled deadline from calendar
@@ -562,14 +665,29 @@ export default function App() {
     return notifications.filter(n => !n.read).length;
   }, [notifications]);
 
+  // Professional Login Gate: Require user to login with credentials provided by Manager
+  if (!currentProfile && !currentUser) {
+    return (
+      <LoginPage
+        onLoginSuccess={(profile) => {
+          setCurrentProfile(profile);
+          showToast(`Selamat datang kembali, ${profile?.name || 'User'}!`);
+        }}
+        isDarkTheme={isDarkTheme}
+        onToggleTheme={toggleTheme}
+      />
+    );
+  }
+
   return (
     <div className={`min-h-screen flex flex-col font-sans transition-colors duration-200 selection:bg-amber-500 selection:text-white ${
       isDarkTheme ? 'bg-stone-950 text-stone-100' : 'bg-slate-100 text-slate-900'
     }`}>
       
-      {/* Navigation Bar with Theme Controls */}
+      {/* Navigation Bar with Theme Controls & Full Auth */}
       <Navbar
         currentUser={currentUser}
+        currentProfile={currentProfile}
         connectionHealthy={connectionHealthy}
         unreadCount={unreadNotificationsCount}
         theme={theme}
@@ -584,6 +702,9 @@ export default function App() {
         onOpenReport={() => setIsReportModalOpen(true)}
         onOpenUsers={() => setIsUserManagerOpen(true)}
         onOpenReset={() => setIsResetModalOpen(true)}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onOpenChangePassword={() => setIsChangePasswordOpen(true)}
+        onSignOut={handleSignOut}
         onSeedData={handleSeedInitialData}
         isSeeding={isSeeding}
       />
@@ -648,6 +769,7 @@ export default function App() {
             projects={projects}
             categories={categories}
             users={users}
+            currentProfile={currentProfile}
             totalResults={filteredTasks.length}
             tasksToExport={filteredTasks}
             onOpenReport={() => setIsReportModalOpen(true)}
@@ -760,7 +882,7 @@ export default function App() {
         isDarkTheme={isDarkTheme}
       />
 
-      {/* User Access & Team Management Modal */}
+      {/* User Access & Team Management Modal (Controlled by Manager) */}
       <UserManagerModal
         isOpen={isUserManagerOpen}
         onClose={() => setIsUserManagerOpen(false)}
@@ -768,6 +890,34 @@ export default function App() {
         tasks={tasks}
         onSaveUser={handleSaveUser}
         onDeleteUser={handleDeleteUser}
+        onRegisterAuthUser={handleRegisterAuthUser}
+        onResetUserPassword={async (userId, newPassword) => {
+          await resetUserPasswordAsManager(userId, newPassword);
+          showToast('Kata sandi pengguna berhasil diubah & disimpan.');
+        }}
+        currentUserRole={currentProfile?.role || 'MANAGER'}
+        isDarkTheme={isDarkTheme}
+      />
+
+      {/* Change Password Modal for logged-in users */}
+      <ChangePasswordModal
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+        userName={currentProfile?.name}
+        isDarkTheme={isDarkTheme}
+      />
+
+      {/* Firebase Authentication Modal (Username & Password) */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onSuccess={(profile) => {
+          if (profile) {
+            setCurrentProfile(profile);
+            localStorage.setItem('at_current_user_id', profile.id);
+            showToast(`Selamat datang @${profile.username || profile.name} (${profile.role})`);
+          }
+        }}
         isDarkTheme={isDarkTheme}
       />
 
@@ -798,6 +948,7 @@ export default function App() {
         onUpdateTask={async (taskId, updates) => {
           await updateTaskPartial(taskId, updates);
         }}
+        currentProfile={currentProfile}
         isDarkTheme={isDarkTheme}
       />
 
